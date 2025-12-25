@@ -175,8 +175,10 @@ def add_adk_fastapi_endpoint(
                 app_name = metadata["app_name"]
                 user_id = metadata["user_id"]
 
-                # Get the session (don't create - just retrieve)
-                session = await agent._session_manager._session_service.get_session(
+                # Get the session (don't create - just retrieve) using the
+                # session manager helper so external threadIds are resolved to
+                # the actual ADK session id (Vertex numeric ids, etc.).
+                session = await agent._session_manager._adk_get_session(
                     session_id=thread_id,
                     app_name=app_name,
                     user_id=user_id

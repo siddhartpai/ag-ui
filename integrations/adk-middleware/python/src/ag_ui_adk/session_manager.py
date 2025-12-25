@@ -67,6 +67,10 @@ class SessionManager:
         # Minimal tracking: just keys and user counts
         self._session_keys: Set[str] = set()  # "app_name:session_id" keys
         self._user_sessions: Dict[str, Set[str]] = {}  # user_id -> set of session_keys
+        # Map external session identifiers (e.g. frontend threadId) to actual ADK
+        # session ids returned by the session service (e.g. numeric Vertex IDs).
+        # Key format: "app_name:external_session_id" -> actual_session_id
+        self._external_id_map: Dict[str, str] = {}
         self._processed_message_ids: Dict[str, Set[str]] = {}
         
         self._cleanup_task: Optional[asyncio.Task] = None
@@ -119,7 +123,8 @@ class SessionManager:
                 await self._remove_oldest_user_session(user_id)
         
         # Get or create via ADK
-        session = await self._session_service.get_session(
+        # Resolve possible mapping from external id to actual ADK session id
+        session = await self._adk_get_session(
             session_id=session_id,
             app_name=app_name,
             user_id=user_id
@@ -135,15 +140,46 @@ class SessionManager:
             logger.info(f"Created new session: {session_key}")
         else:
             logger.debug(f"Retrieved existing session: {session_key}")
-        
-        # Track the session key
-        self._track_session(session_key, user_id)
+
+        # If the session service returned a different session id (common when
+        # backends assign numeric ids), map the external id to the actual id
+        # and track the actual session id.
+        actual_id = getattr(session, 'id', session_id)
+        if actual_id != session_id:
+            map_key = self._make_session_key(app_name, session_id)
+            self._external_id_map[map_key] = actual_id
+            tracked_key = self._make_session_key(app_name, actual_id)
+        else:
+            tracked_key = session_key
+
+        # Track the session key (use the actual id if different)
+        self._track_session(tracked_key, user_id)
         
         # Start cleanup if needed
         if self._auto_cleanup and not self._cleanup_task:
             self._start_cleanup_task()
         
         return session
+
+    async def _adk_get_session(self, session_id: str, app_name: str, user_id: str):
+        """Resolve external session ids and fetch session from underlying service.
+
+        Many remote session services (e.g. Vertex AI) return their own session
+        identifier which may differ from a client-provided 'threadId'. This helper
+        translates an incoming session_id to the actual id (if previously mapped)
+        and invokes the underlying session service.
+        """
+        try:
+            map_key = self._make_session_key(app_name, session_id)
+            actual_id = self._external_id_map.get(map_key, session_id)
+            return await self._session_service.get_session(
+                session_id=actual_id,
+                app_name=app_name,
+                user_id=user_id
+            )
+        except Exception:
+            # Let callers handle exceptions; bubble up
+            raise
     
     # ===== STATE MANAGEMENT METHODS =====
     
@@ -168,7 +204,7 @@ class SessionManager:
             True if successful, False otherwise
         """
         try:
-            session = await self._session_service.get_session(
+            session = await self._adk_get_session(
                 session_id=session_id,
                 app_name=app_name,
                 user_id=user_id
@@ -235,7 +271,7 @@ class SessionManager:
             Session state dictionary or None if session not found
         """
         try:
-            session = await self._session_service.get_session(
+            session = await self._adk_get_session(
                 session_id=session_id,
                 app_name=app_name,
                 user_id=user_id
@@ -277,7 +313,7 @@ class SessionManager:
             Value for the key or default
         """
         try:
-            session = await self._session_service.get_session(
+            session = await self._adk_get_session(
                 session_id=session_id,
                 app_name=app_name,
                 user_id=user_id
@@ -554,7 +590,7 @@ class SessionManager:
         for session_key in self._user_sessions[user_id]:
             app_name, session_id = session_key.split(':', 1)
             try:
-                session = await self._session_service.get_session(
+                session = await self._adk_get_session(
                     session_id=session_id,
                     app_name=app_name,
                     user_id=user_id
@@ -603,6 +639,15 @@ class SessionManager:
         except Exception as e:
             logger.error(f"Failed to delete session {session_key}: {e}")
         
+        # Remove any external id mappings that pointed to this actual session id
+        try:
+            # Collect keys to remove to avoid mutating while iterating
+            to_remove = [k for k, v in self._external_id_map.items() if v == session.id]
+            for k in to_remove:
+                self._external_id_map.pop(k, None)
+        except Exception:
+            pass
+
         self._untrack_session(session_key, session.user_id)
     
     def _start_cleanup_task(self):
@@ -648,7 +693,7 @@ class SessionManager:
                 continue
             
             try:
-                session = await self._session_service.get_session(
+                session = await self._adk_get_session(
                     session_id=session_id,
                     app_name=app_name,
                     user_id=user_id
