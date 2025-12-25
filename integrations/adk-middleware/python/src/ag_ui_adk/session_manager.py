@@ -151,7 +151,16 @@ class SessionManager:
                     getattr(self._session_service, "__class__", self._session_service)
                 )
                 raise
-            logger.info(f"Created new session: {session_key}")
+            # Log created session along with the actual ADK session id (if assigned)
+            try:
+                adk_id = getattr(session, 'id', None)
+            except Exception:
+                adk_id = None
+            logger.info(
+                "Created new session: %s (adk_id=%s)",
+                session_key,
+                adk_id,
+            )
         else:
             logger.debug(f"Retrieved existing session: {session_key}")
 
@@ -186,6 +195,18 @@ class SessionManager:
         try:
             map_key = self._make_session_key(app_name, session_id)
             actual_id = self._external_id_map.get(map_key, session_id)
+            # Debug mapping: show requested thread_id -> resolved actual id
+            try:
+                logger.info(
+                    "_adk_get_session called: requested=%s resolved=%s map_key=%s mapping_snapshot=%s",
+                    session_id,
+                    actual_id,
+                    map_key,
+                    dict(self._external_id_map),
+                )
+            except Exception:
+                logger.debug("_adk_get_session mapping log failed", exc_info=True)
+
             return await self._session_service.get_session(
                 session_id=actual_id,
                 app_name=app_name,
