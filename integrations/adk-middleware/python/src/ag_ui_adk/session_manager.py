@@ -131,12 +131,26 @@ class SessionManager:
         )
         
         if not session:
-            session = await self._session_service.create_session(
-                session_id=session_id,
-                user_id=user_id,
-                app_name=app_name,
-                state=initial_state or {}
-            )
+            try:
+                session = await self._session_service.create_session(
+                    session_id=session_id,
+                    user_id=user_id,
+                    app_name=app_name,
+                    state=initial_state or {}
+                )
+            except Exception as e:
+                logger.error(
+                    "Session service create_session failed",
+                    exc_info=True
+                )
+                logger.error(
+                    "create_session params: session_id=%s, app_name=%s, user_id=%s, service=%s",
+                    session_id,
+                    app_name,
+                    user_id,
+                    getattr(self._session_service, "__class__", self._session_service)
+                )
+                raise
             logger.info(f"Created new session: {session_key}")
         else:
             logger.debug(f"Retrieved existing session: {session_key}")
@@ -177,8 +191,20 @@ class SessionManager:
                 app_name=app_name,
                 user_id=user_id
             )
-        except Exception:
-            # Let callers handle exceptions; bubble up
+        except Exception as e:
+            logger.error(
+                "Session service get_session failed",
+                exc_info=True
+            )
+            logger.error(
+                "get_session params: requested_session_id=%s, resolved_session_id=%s, app_name=%s, user_id=%s, map_key=%s, service=%s",
+                session_id,
+                actual_id if 'actual_id' in locals() else None,
+                app_name,
+                user_id,
+                map_key if 'map_key' in locals() else None,
+                getattr(self._session_service, "__class__", self._session_service)
+            )
             raise
     
     # ===== STATE MANAGEMENT METHODS =====
@@ -638,6 +664,13 @@ class SessionManager:
             logger.debug(f"Deleted session: {session_key}")
         except Exception as e:
             logger.error(f"Failed to delete session {session_key}: {e}")
+            logger.error(
+                "delete_session params: session_id=%s, app_name=%s, user_id=%s, service=%s",
+                session.id,
+                session.app_name,
+                session.user_id,
+                getattr(self._session_service, "__class__", self._session_service)
+            )
         
         # Remove any external id mappings that pointed to this actual session id
         try:
