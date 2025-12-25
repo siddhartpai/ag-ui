@@ -114,6 +114,11 @@ class SessionManager:
         Returns the ADK session object directly.
         """
         session_key = self._make_session_key(app_name, session_id)
+        # Log entry so we can detect whether this method is being invoked at runtime
+        try:
+            logger.info("get_or_create_session called: %s user=%s", session_key, user_id)
+        except Exception:
+            logger.debug("get_or_create_session entry log failed", exc_info=True)
         
         # Check user limits before creating
         if session_key not in self._session_keys and self._max_per_user:
@@ -129,10 +134,16 @@ class SessionManager:
             app_name=app_name,
             user_id=user_id
         )
-        logger.info(
-                "Created new session: %s (adk_id=%s)",
-                session_key,
-                session.id)
+        # Safely log resolved ADK session id (session may be None)
+        try:
+            adk_id = getattr(session, 'id', None)
+        except Exception:
+            adk_id = None
+        logger.debug(
+            "Resolved ADK session: %s (adk_id=%s)",
+            session_key,
+            adk_id,
+        )
         if not session:
             try:
                 try:
