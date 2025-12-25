@@ -129,7 +129,10 @@ class SessionManager:
             app_name=app_name,
             user_id=user_id
         )
-        
+        logger.info(
+                "Created new session: %s (adk_id=%s)",
+                session_key,
+                session.id)
         if not session:
             try:
                 try:
