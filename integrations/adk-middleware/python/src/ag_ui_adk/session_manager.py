@@ -132,6 +132,16 @@ class SessionManager:
         
         if not session:
             try:
+                try:
+                    logger.info(
+                        "Creating session via session_service: session_id=%s app_name=%s user_id=%s service=%s",
+                        session_id,
+                        app_name,
+                        user_id,
+                        getattr(self._session_service, "__class__", self._session_service),
+                    )
+                except Exception:
+                    logger.debug("Failed to log create_session params", exc_info=True)
                 session = await self._session_service.create_session(
                     session_id=session_id,
                     user_id=user_id,
