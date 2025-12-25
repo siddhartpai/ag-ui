@@ -171,6 +171,16 @@ class SessionManager:
         if actual_id != session_id:
             map_key = self._make_session_key(app_name, session_id)
             self._external_id_map[map_key] = actual_id
+            try:
+                logger.info(
+                    "Mapped external id to ADK session id: thread_id=%s -> session_id=%s (map_key=%s, service=%s)",
+                    session_id,
+                    actual_id,
+                    map_key,
+                    getattr(self._session_service, "__class__", self._session_service),
+                )
+            except Exception:
+                logger.debug("Failed to log external->ADK mapping", exc_info=True)
             tracked_key = self._make_session_key(app_name, actual_id)
         else:
             tracked_key = session_key
